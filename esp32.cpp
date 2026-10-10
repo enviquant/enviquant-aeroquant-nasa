@@ -16,15 +16,29 @@
 #include <DallasTemperature.h>
 
 // ═══════════════════════════════════════
-// 📶 WiFi Configuration
+// WiFi + MQTT Configuration
+// Set these before flashing. Never commit real credentials.
+// Optionally create "esp32.config.h" next to this file with
+//   #define CONFIG_WIFI_SSID "..."
+//   #define CONFIG_WIFI_PASSWORD "..."
+//   #define CONFIG_MQTT_BROKER "..."
+// See esp32.config.example.h for a template.
 // ═══════════════════════════════════════
-const char* WIFI_SSID     = "Sweet Home";
-const char* WIFI_PASSWORD = "SweetHome@1234@69#";
-
-// ═══════════════════════════════════════
-// 📡 MQTT Configuration
-// ═══════════════════════════════════════
-const char* MQTT_BROKER   = "198.195.239.38";
+#if __has_include("esp32.config.h")
+#include "esp32.config.h"
+#endif
+#ifndef CONFIG_WIFI_SSID
+#define CONFIG_WIFI_SSID "YOUR_WIFI_SSID"
+#endif
+#ifndef CONFIG_WIFI_PASSWORD
+#define CONFIG_WIFI_PASSWORD "YOUR_WIFI_PASSWORD"
+#endif
+#ifndef CONFIG_MQTT_BROKER
+#define CONFIG_MQTT_BROKER "YOUR_MQTT_HOST"
+#endif
+const char* WIFI_SSID     = CONFIG_WIFI_SSID;
+const char* WIFI_PASSWORD = CONFIG_WIFI_PASSWORD;
+const char* MQTT_BROKER   = CONFIG_MQTT_BROKER;
 const int   MQTT_PORT     = 1883;
 const char* MQTT_CLIENT   = "aeroponics-esp32-01";
 const char* TOPIC_SENSOR  = "aeroponics/sensors";
@@ -109,18 +123,10 @@ int refillPumpState = 0;
 // ═══════════════════════════════════════
 // 🤖 Mode State
 // ═══════════════════════════════════════
-bool autoModeEnabled = false; // ⚠️ সবসময় false দিয়ে শুরু (manual default)
-bool preemptiveCoolingActive = false; // 🛰️ NASA POWER heatwave defense override
+bool autoModeEnabled = false; // Always start in manual mode
+bool preemptiveCoolingActive = false; // NASA POWER heatwave defense override
 // ═══════════════════════════════════════
-// 🎭 SHOWCASE SETTINGS
-// ═══════════════════════════════════════
-#define SHOWCASE_MODE    true
-#define ROOT_TEMP_OFFSET -3.0
-#define ROOT_HUM_OFFSET  -8.0
-#define PH_SHOWCASE      true
-#define TDS_SHOWCASE     true
-// ═══════════════════════════════════════
-// ⏱️ Timing
+// Timing
 // ═══════════════════════════════════════
 unsigned long lastSensorRead  = 0;
 unsigned long lastMqttPublish = 0;
@@ -200,6 +206,27 @@ void checkWaterLevelSafety() {
 }
 
 // ═══════════════════════════════════════════════════════════
+// 🛰️ NASA PREEMPTIVE ACKNOWLEDGMENT
+// ═══════════════════════════════════════════════════════════
+void sendPreemptiveAck(bool activated) {
+  StaticJsonDocument<256> doc;
+  doc["type"] = "nasa_ack";
+  doc["device"] = "preemptive_cooling";
+  doc["action"] = activated ? 1 : 0;
+  doc["timestamp"] = millis();
+  doc["status"] = activated ? "NASA Preemptive Protocol Activated" : "NASA Preemptive Protocol Released";
+
+  char jsonBuffer[256];
+  serializeJson(doc, jsonBuffer);
+
+  if (mqtt.publish("aeroponics/ack", jsonBuffer)) {
+    Serial.println("📤 Preemptive cooling acknowledgment sent to server");
+  } else {
+    Serial.println("❌ Failed to send acknowledgment");
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
 // 📡 MQTT CALLBACK - Backend/Dashboard থেকে command আসলে
 // ═══════════════════════════════════════════════════════════
 void mqttCallback(char* topic, byte* payload, unsigned int length) {
@@ -244,11 +271,16 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
       digitalWrite(COOLING_PIN, LOW);       // Peltier ON
       digitalWrite(MINI_PUMP_PIN, HIGH);    // Circulation pump ON
       Serial.println("🚨 NASA PREEMPTIVE COOLING ACTIVE — Heatwave defense engaged!");
+      Serial.println("🛰️ NASA Preemptive Protocol Activated");
+      // Send acknowledgment back to server
+      sendPreemptiveAck(true);
     } else {
       coolingState = 0;
       digitalWrite(COOLING_PIN, HIGH);      // Peltier OFF
       digitalWrite(MINI_PUMP_PIN, LOW);     // Pump OFF
       Serial.println("✅ NASA Preemptive Cooling released — normal operation resumed");
+      // Send release acknowledgment back to server
+      sendPreemptiveAck(false);
     }
     return;
   }
@@ -439,52 +471,15 @@ void readAllSensors() {
 void publishSensorData() {
   StaticJsonDocument<512> doc;
 
-  // Sensor readings
-// ═══════════════════════════════════════════════════════
-// 🎭 SHOWCASE OFFSET — Exhibition এর জন্য
-// Real value থেকে কমিয়ে দেখাচ্ছে (sensor accurate আছে)
-// Future: এটা remove করলেই real value দেখাবে
-// ═══════════════════════════════════════════════════════
-//#define SHOWCASE_MODE true          // false করলে real value
-//#define ROOT_TEMP_OFFSET  -4.0     // 5°C কমাবে (change করতে পারবি)
-//#define ROOT_HUM_OFFSET   -18.0     // 6% কমাবে (change করতে পারবি)
-
-float displayRootTemp = rootTemp;
-float displayRootHum  = rootHumidity;
-
-#if SHOWCASE_MODE
-  displayRootTemp = rootTemp + ROOT_TEMP_OFFSET;
-  displayRootHum  = rootHumidity + ROOT_HUM_OFFSET;
-  // Clamp: যাতে negative না হয়
-  if (displayRootTemp < 0) displayRootTemp = 0;
-  if (displayRootHum  < 0) displayRootHum  = 0;
-#endif
-
-doc["root_temp"]     = round(displayRootTemp * 10.0) / 10.0;
-doc["root_humidity"] = round(displayRootHum  * 10.0) / 10.0;
+  // Live sensor readings — published exactly as measured.
+  doc["root_temp"]     = round(rootTemp * 10.0) / 10.0;
+  doc["root_humidity"] = round(rootHumidity * 10.0) / 10.0;
   doc["ambient_temp"]     = round(ambientTemp * 10.0) / 10.0;
   doc["ambient_humidity"] = round(ambientHum * 10.0) / 10.0;
-  doc["water_temp1"] = round((waterTemp1 - 3.0) * 10.0) / 10.0;
+  doc["water_temp1"] = round(waterTemp1 * 10.0) / 10.0;
   doc["water_temp2"]      = round(waterTemp2 * 10.0) / 10.0;
- // 🎭 pH SHOWCASE — Fixed optimal value
-// Aeroponic এর ideal pH = 6.0
-// Real sensor লাগালে false করো
-#define PH_SHOWCASE true
-
-#if PH_SHOWCASE
-  doc["ph"] = 6.0;
-#else
   doc["ph"] = round(phValue * 10.0) / 10.0;
-#endif
-  // 🎭 TDS SHOWCASE — Fixed optimal value
-// Aeroponic leafy greens ideal: 700-800 ppm
-#define TDS_SHOWCASE true
-
-#if TDS_SHOWCASE
-  doc["tds"] = 750;
-#else
   doc["tds"] = round(tdsValue);
-#endif
   doc["water_level"]      = waterLevel;      // Pin 13: 1=OK, 0=LOW
   doc["main_water_level"] = mainWaterLevel;  // Pin 14: 1=FULL, 0=not full
 

@@ -1,86 +1,45 @@
 # AeroQuant — IoT Aeroponic Farming with NASA-Powered Heatwave Defense
 
-**NASA Space Apps Challenge 2026** | Category: Field Shift — Adapting Farms with NASA Data
+AeroQuant is an IoT-integrated aeroponic farming system that uses NASA POWER API satellite data to predict extreme heat events **before they arrive**, automatically triggering root-zone micro-cooling to protect crops.
 
----
+## How it works
 
-## Elevator Pitch
+Aeroponic roots suspended in air are efficient but vulnerable to heat stress: root zones overheat within minutes, nutrient solution breeds pathogens, and a single hot afternoon can destroy a crop. Most IoT systems react **after** sensors detect heat — too late.
 
-AeroQuant is an IoT-integrated aeroponic farming system that uses NASA POWER API satellite data to predict extreme heat events **before they arrive**, automatically triggering root-zone micro-cooling to protect crops. Reactive cooling is too late — AeroQuant fights heatwaves preemptively.
-
----
-
-## The Problem
-
-Aeroponic systems suspend plant roots in air and mist them with nutrient solution. This makes them incredibly efficient — but also extremely vulnerable to heat stress. When ambient temperatures spike:
-
-- Root zones overheat within minutes, damaging delicate root hairs
-- Nutrient solution becomes a breeding ground for pathogens
-- Crop loss can occur in a single afternoon
-
-Traditional IoT farming systems react to heat **after** sensors detect it. By then, the damage is already done. Farmers need **predictive** defense, not reactive.
-
----
-
-## The Solution: Root-Zone Micro-Cooling
-
-AeroQuant's Root-Zone Micro-Cooling system uses Peltier elements to actively chill the nutrient solution buffer tank. When engaged, it maintains optimal root-zone temperature (20-25°C) regardless of ambient conditions.
-
-**The breakthrough:** Instead of waiting for local sensors to detect heat, AeroQuant queries NASA's POWER API for 72-hour temperature forecasts. When extreme heat is predicted, the system engages cooling **hours before the heatwave arrives** — keeping the root zone in the safe zone while ambient temperatures are still climbing.
-
----
-
-## How We Use NASA Data
-
-### NASA POWER API Integration
-
-We use the [NASA POWER API](https://power.larc.nasa.gov/) (Prediction Of Worldwide Energy Resources) to fetch hourly temperature forecasts (T2M — Temperature at 2 Meters) for our farm's exact GPS coordinates.
-
-**Data Flow:**
+AeroQuant queries NASA's POWER API for the 72-hour temperature forecast for the farm's GPS coordinates. When extreme heat is predicted, it engages Peltier-based root-zone cooling **hours before the heatwave arrives**, holding the nutrient buffer tank at 20–25 °C while ambient temperatures climb.
 
 ```
 NASA POWER API (satellite + reanalysis data)
-    ↓
-Go Backend (fetch every 30 min)
-    ↓
-Threshold Analysis (T2M > 35°C = heat alert)
-    ↓
-MQTT Command → ESP32 (preemptive cooling ON)
-    ↓
-WebSocket Broadcast → Dashboard (alert banner)
+    ↓ HTTP (every 30 min)
+Go backend (fetch → threshold analysis, T2M > 35 °C = heat alert)
+    ↓ MQTT command → ESP32 (preemptive cooling ON)
+    ↓ WebSocket broadcast → dashboard (alert banner)
 ```
 
-**API Endpoint Used:**
+**NASA POWER endpoint used:**
+
 ```
 https://power.larc.nasa.gov/api/temporal/hourly/point
   ?parameters=T2M
   &community=AG
-  &longitude=90.4074
-  &latitude=23.8103
-  &start=20261005
-  &end=20261010
+  &longitude=<NASA_LON>
+  &latitude=<NASA_LAT>
+  &start=<today>&end=<today+72h>
   &format=JSON
 ```
 
-**Why NASA POWER?**
-- Global coverage — works for any farm location
-- Satellite-derived data — more accurate than ground stations for regional trends
-- Free and open — no API key required
-- Hourly resolution — precise enough for preemptive action
+Why NASA POWER: global coverage for any farm location, satellite-derived regional trends, free with no API key, hourly resolution for preemptive action.
 
----
-
-## System Architecture
+## System architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                        NASA POWER API                           │
-│                  (Satellite Weather Data)                        │
 └──────────────────────────┬──────────────────────────────────────┘
-                           │ HTTP (every 30 min)
-                           ▼
+                            │ HTTP (every 30 min)
+                            ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                     GO BACKEND (v3.0)                           │
+│                     GO BACKEND (v3.0.0)                         │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────────────┐  │
 │  │ NASA Service │  │ Auto Control │  │  WebSocket + REST    │  │
 │  │ (fetch/analyze)│  │   Loop       │  │  API Server          │  │
@@ -90,33 +49,97 @@ https://power.larc.nasa.gov/api/temporal/hourly/point
 │                  │                               │              │
 │              MQTT Publish              WebSocket Broadcast      │
 └──────────────────┼───────────────────────────────┼──────────────┘
-                   │                               │
-         ┌─────────┴─────────┐           ┌─────────┴─────────┐
-         │                   │           │                   │
-         ▼                   ▼           ▼                   ▼
+                    │                               │
+          ┌─────────┴─────────┐           ┌─────────┴─────────┐
+          │                   │           │                   │
+          ▼                   ▼           ▼                   ▼
 ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────────┐
-│   ESP32 EDGE    │  │   ESP32 EDGE    │  │  REACT DASHBOARD    │
-│  (Sensors +     │  │  (Actuators +   │  │  (Real-time UI +    │
-│   Relays)       │  │   Preemptive    │  │   NASA Forecast     │
-│                 │  │   Cooling)      │  │   Widget + Alerts)  │
+│   ESP32 EDGE    │  │   MOSQUITTO     │  │  REACT DASHBOARD    │
+│  (Sensors +     │  │  (local MQTT    │  │  (Real-time UI +    │
+│   Relays)       │  │   broker)       │  │   NASA Forecast     │
+│                 │  │                 │  │   + Alerts)         │
 └─────────────────┘  └─────────────────┘  └─────────────────────┘
 ```
 
-### Tech Stack
-
 | Layer | Technology |
 |---|---|
-| **Edge** | ESP32 DevKit, Arduino C++, PubSubClient (MQTT) |
-| **Backend** | Go 1.25, Eclipse Paho MQTT, Gorilla WebSocket |
-| **Frontend** | React 18, WebSocket API, CSS Glassmorphism |
-| **NASA Data** | POWER API (hourly T2M, AG community) |
-| **Communication** | MQTT (IoT commands), WebSocket (real-time dashboard) |
+| Edge | ESP32 DevKit, Arduino C++, PubSubClient (MQTT) |
+| Backend | Go 1.25, Eclipse Paho MQTT, Gorilla WebSocket |
+| Frontend | React 19, Tailwind CSS, WebSocket API |
+| NASA Data | POWER API (hourly T2M, AG community) |
+| Messaging | MQTT (IoT commands, self-hosted Mosquitto), WebSocket (dashboard) |
 
----
+## Production deploy (single VPS, recommended)
 
-## Hardware Setup
+Prerequisites: Docker + Docker Compose plugin, a VPS with ports 80/1883 reachable by your ESP32.
 
-### ESP32 Pin Map
+```bash
+# 1. Configure
+cp .env.example .env            # set REACT_APP_DASHBOARD_PASSWORD
+cp backend/.env.example backend/.env   # defaults work for compose; set NASA_LAT/LON
+cp frontend/.env.example frontend/.env # same password as above
+
+# 2. Build + run (mosquitto + backend + frontend)
+docker compose up --build -d
+
+# 3. Verify
+curl http://localhost/api/health
+```
+
+- Frontend: `http://<vps-host>/` (nginx serves the React build, proxies `/ws` + `/api` to the backend).
+- Backend health: `GET /api/health` → `{ status, mqtt, clients, auto_mode, nasa_alert, nasa_max_temp, version }`.
+- MQTT: `mosquitto` service on port 1883. Point the ESP32 at your VPS host (see firmware section).
+- HTTPS: terminate TLS in front of this compose stack (reverse proxy / load balancer) and set `REACT_APP_WS_URL=wss://<host>/ws` + `REACT_APP_API_URL=https://<host>` at frontend build time if the frontend is served elsewhere.
+
+## Local development
+
+Prerequisites: Go 1.25+, Node.js 18+, Arduino IDE, local Mosquitto (or any reachable MQTT broker).
+
+### Backend
+
+```bash
+cd backend
+cp .env.example .env   # set MQTT_BROKER=localhost for local Mosquitto
+go mod download
+go run .
+```
+
+Listens on `WS_PORT` (default `8071`).
+
+| Variable | Default | Description |
+|---|---|---|
+| `MQTT_BROKER` | `localhost` | MQTT broker host (compose sets `mosquitto`) |
+| `MQTT_PORT` | `1883` | MQTT broker port |
+| `MQTT_CLIENT_ID` | `aeroponics-server-01` | MQTT client ID |
+| `MQTT_TOPIC_SENSOR` | `aeroponics/sensors` | Sensor data topic |
+| `MQTT_TOPIC_CONTROL` | `aeroponics/control` | Control command topic |
+| `MQTT_TOPIC_ACK` | `aeroponics/ack` | ESP32 acknowledgment topic |
+| `WS_PORT` | `8071` | WebSocket/HTTP server port |
+| `NASA_LAT` | `23.8103` | Farm latitude |
+| `NASA_LON` | `90.4074` | Farm longitude |
+| `NASA_THRESHOLD` | `35.0` | Heat alert threshold (°C) |
+| `NASA_FETCH_INTERVAL_MIN` | `30` | NASA API fetch interval (minutes) |
+
+### Frontend
+
+```bash
+cd frontend
+cp .env.example .env   # set REACT_APP_DASHBOARD_PASSWORD
+npm install
+npm start
+```
+
+Opens `http://localhost:3000`. The dev server proxies nothing by itself — point it at a running backend via `REACT_APP_WS_URL` / `REACT_APP_API_URL`, or run the full compose stack.
+
+The dashboard gate password comes from `REACT_APP_DASHBOARD_PASSWORD` (no default is committed). Camera vision and cultivation-map panels are disabled Roadmap placeholders until a live vision model is connected — they never render simulated alerts.
+
+### ESP32
+
+1. Copy `esp32.config.example.h` to `esp32.config.h` (git-ignored) and set `CONFIG_WIFI_SSID`, `CONFIG_WIFI_PASSWORD`, `CONFIG_MQTT_BROKER` (your VPS host or local broker IP).
+2. Open `esp32.cpp` in Arduino IDE, install libraries: `PubSubClient`, `ArduinoJson`, `DHT sensor library`, `OneWire` + `DallasTemperature`, `ArduinoOTA`.
+3. Select board `ESP32 Dev Module` and flash.
+
+Pin map:
 
 | Component | Pin | Type |
 |---|---|---|
@@ -134,119 +157,27 @@ https://power.larc.nasa.gov/api/temporal/hourly/point
 | Exhaust Fan PWM | GPIO 18 | PWM Output |
 | Mini Pump (MOSFET) | GPIO 19 | Digital Output |
 
-### Wiring Notes
+All relays are active-low. Float sensors use `INPUT_PULLUP`. DS18B20 needs a 4.7 kΩ pull-up. Telemetry is published exactly as measured — no offsets or fixed values.
 
-- All relays are **active-low** (LOW = ON, HIGH = OFF)
-- Float sensors use `INPUT_PULLUP` — unplugged reads HIGH
-- DS18B20 requires 4.7kΩ pull-up resistor on data line
-- Peltier module powered via relay + external 12V supply
-
----
-
-## Local Run Instructions
-
-### Prerequisites
-
-- Go 1.25+
-- Node.js 18+
-- Arduino IDE (for ESP32 flashing)
-- MQTT broker (default: `broker.hivemq.com:1883`)
-
-### 1. Backend
-
-```bash
-cd backend
-
-# Install dependencies
-go mod download
-
-# Configure environment
-cp .env.example .env
-# Edit .env with your settings
-
-# Run
-go run .
-```
-
-The backend starts on port `8071` (configurable via `WS_PORT`).
-
-**Environment Variables:**
-
-| Variable | Default | Description |
-|---|---|---|
-| `MQTT_BROKER` | `broker.hivemq.com` | MQTT broker address |
-| `MQTT_PORT` | `1883` | MQTT broker port |
-| `MQTT_CLIENT_ID` | `aeroponics-server-01` | MQTT client ID |
-| `MQTT_TOPIC_SENSOR` | `aeroponics/sensors` | Sensor data topic |
-| `MQTT_TOPIC_CONTROL` | `aeroponics/control` | Control command topic |
-| `WS_PORT` | `8071` | WebSocket/HTTP server port |
-| `NASA_LAT` | `23.8103` | Farm latitude (Dhaka) |
-| `NASA_LON` | `90.4074` | Farm longitude (Dhaka) |
-| `NASA_THRESHOLD` | `35.0` | Heat alert threshold (°C) |
-| `NASA_FETCH_INTERVAL_MIN` | `30` | NASA API fetch interval (minutes) |
-
-### 2. Frontend
-
-```bash
-cd frontend
-
-# Install dependencies
-npm install
-
-# Start development server
-npm start
-```
-
-Open `http://localhost:3000` in your browser.
-
-**Default password:** `envi999`
-
-### 3. ESP32
-
-1. Open `esp32.cpp` in Arduino IDE
-2. Install required libraries:
-   - `PubSubClient` (by Nick O'Leary)
-   - `ArduinoJson` (by Benoit Blanchon)
-   - `DHT sensor library` (by Adafruit)
-   - `OneWire` + `DallasTemperature`
-   - `ArduinoOTA`
-3. Update WiFi credentials (`WIFI_SSID`, `WIFI_PASSWORD`)
-4. Update MQTT broker address (`MQTT_BROKER`)
-5. Select board: `ESP32 Dev Module`
-6. Flash to ESP32
-
----
-
-## API Endpoints
+## API endpoints
 
 | Endpoint | Method | Description |
 |---|---|---|
-| `/ws` | WebSocket | Real-time sensor data + NASA alerts |
+| `/ws` | WebSocket | Real-time sensor data + NASA alerts + control channel |
 | `/api/data` | GET | Latest sensor readings |
-| `/api/control` | POST | Send control command to ESP32 |
+| `/api/control` | POST | Send control command to ESP32 (`{ device, action }`) |
 | `/api/auto` | GET/POST | Auto mode configuration |
 | `/api/health` | GET | System health + NASA status |
 | `/api/nasa/forecast` | GET | Current NASA POWER forecast |
 
----
+## Security checklist
 
-## NASA Space Apps Challenge
-
-**Category:** Field Shift — Adapting Farms with NASA Data
-
-**Team:** EnviQuant
-
-**Submission:** AeroQuant demonstrates how NASA's open satellite data can be directly integrated into IoT farming infrastructure to solve a real-world agricultural problem. By combining NASA POWER API forecasts with edge computing and real-time control, we've created a system that doesn't just monitor the environment — it **anticipates and defends against it**.
-
----
+- Never commit `.env`, `esp32.config.h`, or credentials. Templates only (`*.example`).
+- Set a strong `REACT_APP_DASHBOARD_PASSWORD` for every deployment.
+- The previously committed WiFi credential, dashboard password, and broker IP in git history must be rotated — treat them as compromised.
+- Restrict MQTT (firewall / authentication) if the broker is exposed beyond your devices.
+- Prefer HTTPS/WSS in production (TLS-terminating reverse proxy in front of compose).
 
 ## License
 
-MIT License — see [LICENSE](LICENSE) for details.
-
----
-
-## Acknowledgments
-
-- [NASA POWER API](https://power.larc.nasa.gov/) — Prediction Of Worldwide Energy Resources
-- [NASA Space Apps Challenge](https://www.spaceappschallenge.org/) — for the inspiration and platform
+MIT — see [LICENSE](LICENSE).

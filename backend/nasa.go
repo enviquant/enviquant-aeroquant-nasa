@@ -34,11 +34,14 @@ type NASAService struct {
 	Threshold float64
 	Interval  time.Duration
 
-	mu             sync.RWMutex
-	latestForecast []NASAForecast
-	maxTemp        float64
-	alertActive    bool
-	lastFetch      time.Time
+	mu              sync.RWMutex
+	latestForecast  []NASAForecast
+	maxTemp         float64
+	alertActive     bool
+	lastFetch       time.Time
+	esp32Acked      bool
+	esp32AckTime    time.Time
+	preemptiveCount int
 }
 
 // nasaPowerResponse matches the NASA POWER API JSON structure
@@ -192,6 +195,11 @@ func (s *NASAService) triggerPreemptiveCooling(alert bool) {
 		action = 1
 	}
 
+	s.mu.Lock()
+	s.preemptiveCount++
+	s.esp32Acked = false
+	s.mu.Unlock()
+
 	// Send MQTT command to ESP32
 	sendCommand("preemptive_cooling", action)
 
@@ -212,6 +220,24 @@ func (s *NASAService) triggerPreemptiveCooling(alert bool) {
 		"source":     "NASA POWER API",
 		"location":   fmt.Sprintf("%.4f, %.4f", s.Latitude, s.Longitude),
 	})
+}
+
+// HandleESP32Ack processes acknowledgment from ESP32
+func (s *NASAService) HandleESP32Ack(acked bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.esp32Acked = acked
+	s.esp32AckTime = time.Now()
+	if acked {
+		log.Println("✅ ESP32 acknowledged preemptive cooling command")
+	}
+}
+
+// GetAckState returns ESP32 acknowledgment status
+func (s *NASAService) GetAckState() (bool, time.Time) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.esp32Acked, s.esp32AckTime
 }
 
 // HandleForecast serves the current forecast via REST API

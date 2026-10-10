@@ -2,5 +2,21 @@ node_modules/
 *.exe
 *.log
 .env
+.env.local
 __pycache__/
 .DS_Store
+
+# ESP32 local credentials (see esp32.config.example.h)
+esp32.config.h
+
+# Go build output
+backend/server
+backend/*.test
+
+# Frontend build output is covered by frontend/.gitignore,
+# but keep a root-level guard too.
+frontend/build/
+
+# Mosquitto runtime data
+mosquitto/data/
+mosquitto/log/

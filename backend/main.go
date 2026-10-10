@@ -314,6 +314,18 @@ var onConnect mqtt.OnConnectHandler = func(client mqtt.Client) {
 	} else {
 		log.Printf("📡 Subscribed: %s", sensorTopic)
 	}
+
+	ackTopic := os.Getenv("MQTT_TOPIC_ACK")
+	if ackTopic == "" {
+		ackTopic = "aeroponics/ack"
+	}
+	token2 := client.Subscribe(ackTopic, 1, onAckMessage)
+	token2.Wait()
+	if token2.Error() != nil {
+		log.Printf("❌ ACK Subscribe error: %v", token2.Error())
+	} else {
+		log.Printf("📡 Subscribed: %s", ackTopic)
+	}
 }
 
 var onConnectionLost mqtt.ConnectionLostHandler = func(client mqtt.Client, err error) {
@@ -331,6 +343,23 @@ var onSensorMessage mqtt.MessageHandler = func(client mqtt.Client, msg mqtt.Mess
 	latestData = data
 	dataMutex.Unlock()
 	broadcastJSON(map[string]interface{}{"type": "sensor_data", "data": data})
+}
+
+var onAckMessage mqtt.MessageHandler = func(client mqtt.Client, msg mqtt.Message) {
+	var ack struct {
+		Type   string `json:"type"`
+		Device string `json:"device"`
+		Action int    `json:"action"`
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal(msg.Payload(), &ack); err != nil {
+		log.Printf("❌ ACK parse error: %v", err)
+		return
+	}
+	if ack.Type == "nasa_ack" && ack.Device == "preemptive_cooling" {
+		nasaService.HandleESP32Ack(ack.Action == 1)
+		log.Printf("📡 ESP32 ACK: preemptive_cooling=%d (%s)", ack.Action, ack.Status)
+	}
 }
 
 // ============================================================
@@ -512,16 +541,16 @@ func handleHealth(w http.ResponseWriter, r *http.Request) {
 	autoMutex.RUnlock()
 	nasaAlert, nasaMaxTemp := nasaService.GetAlertState()
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"status":            "running",
-		"mqtt":              mqttClient.IsConnected(),
-		"clients":           len(wsClients),
-		"auto_mode":         isAuto,
-		"peltier_uses":      "waterTemp1 (buffer tank)",
-		"monitoring_only":   "waterTemp2 (main tank)",
-		"nasa_alert":        nasaAlert,
-		"nasa_max_temp":     nasaMaxTemp,
-		"server":            "AeroQuant — EnviQuant",
-		"version":           "3.0.0",
+		"status":          "running",
+		"mqtt":            mqttClient.IsConnected(),
+		"clients":         len(wsClients),
+		"auto_mode":       isAuto,
+		"peltier_uses":    "waterTemp1 (buffer tank)",
+		"monitoring_only": "waterTemp2 (main tank)",
+		"nasa_alert":      nasaAlert,
+		"nasa_max_temp":   nasaMaxTemp,
+		"server":          "AeroQuant",
+		"version":         "3.0.0",
 	})
 }
 
@@ -541,10 +570,10 @@ func main() {
 	clientID := os.Getenv("MQTT_CLIENT_ID")
 	wsPort := os.Getenv("WS_PORT")
 
-	if broker == "" { broker = "broker.hivemq.com" }
+	if broker == "" { broker = "localhost" }
 	if port == "" { port = "1883" }
 	if clientID == "" { clientID = "aeroponics-server-01" }
-	if wsPort == "" { wsPort = "8080" }
+	if wsPort == "" { wsPort = "8071" }
 
 	opts := mqtt.NewClientOptions()
 	opts.AddBroker(fmt.Sprintf("tcp://%s:%s", broker, port))
@@ -576,7 +605,7 @@ func main() {
 	http.HandleFunc("/api/nasa/forecast", nasaService.HandleForecast)
 
 	log.Println("══════════════════════════════════════════")
-	log.Println("🌱 AeroQuant Backend v2.1 — EnviQuant")
+	log.Println("🌱 AeroQuant Backend v3.0.0")
 	log.Printf("📡 MQTT:      %s:%s", broker, port)
 	log.Printf("🌐 WebSocket: ws://0.0.0.0:%s/ws", wsPort)
 	log.Printf("🤖 Auto API:  http://0.0.0.0:%s/api/auto", wsPort)

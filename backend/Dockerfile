@@ -7,7 +7,8 @@ RUN go build -o server .
 
 FROM alpine:latest
 WORKDIR /app
+RUN apk add --no-cache ca-certificates
 COPY --from=builder /app/server .
-COPY .env* ./
+# .env is injected at runtime (compose env_file / environment), never baked in.
 EXPOSE 8071
 CMD ["./server"]
